@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Talaba Ijara</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:var(--tg-theme-bg-color,#fff);--fg:var(--tg-theme-text-color,#111);--hint:var(--tg-theme-hint-color,#777);--btn:var(--tg-theme-button-color,#2481cc);--btnt:var(--tg-theme-button-text-color,#fff);--card:var(--tg-theme-secondary-bg-color,#f1f1f4)}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:12px;padding-bottom:80px}
+h1{font-size:20px;margin:4px 0 12px}
+.tabs{display:flex;gap:8px;margin-bottom:10px}
+.tabs button,.chip{flex:1;padding:9px;border:0;border-radius:10px;background:var(--card);color:var(--fg);font-size:14px}
+.tabs button.on{background:var(--btn);color:var(--btnt)}
+.filters{display:flex;gap:8px;margin-bottom:12px}
+input,select,textarea{width:100%;padding:10px;border:1px solid #ccc4;border-radius:10px;background:var(--card);color:var(--fg);font-size:15px;margin-bottom:10px}
+.card{background:var(--card);border-radius:14px;margin-bottom:12px;overflow:hidden}
+.card .imgs{display:flex;overflow-x:auto;gap:4px}
+.card img{height:180px;min-width:80%;object-fit:cover}
+.card .b{padding:12px}
+.price{font-weight:700;font-size:17px}
+.meta{color:var(--hint);font-size:13px;margin:4px 0}
+.row{display:flex;gap:8px;margin-top:10px}
+.btn{flex:1;text-align:center;padding:10px;border-radius:10px;background:var(--btn);color:var(--btnt);text-decoration:none;border:0;font-size:15px}
+.btn.alt{background:transparent;color:var(--btn);border:1px solid var(--btn)}
+.fab{position:fixed;left:12px;right:12px;bottom:12px;padding:14px;font-size:16px}
+.hide{display:none}
+.empty{text-align:center;color:var(--hint);margin-top:40px}
+</style>
+</head>
+<body>
+<div id="list">
+  <h1>🏠 Talaba Ijara</h1>
+  <div class="tabs">
+    <button id="t-offer" class="on" onclick="setKind('offer')">Kvartira beraman</button>
+    <button id="t-request" onclick="setKind('request')">Xona qidiryapman</button>
+  </div>
+  <div class="filters">
+    <input id="f-district" placeholder="Tuman" oninput="load()" style="margin:0">
+    <input id="f-price" type="number" placeholder="Maks. narx" oninput="load()" style="margin:0">
+  </div>
+  <div id="items"></div>
+  <button class="btn fab" onclick="showForm()">+ E'lon qo'shish</button>
+</div>
+
+<div id="form" class="hide">
+  <h1>Yangi e'lon</h1>
+  <select id="kind"><option value="offer">Kvartira / xona beraman</option><option value="request">Xona qidiryapman</option></select>
+  <input id="title" placeholder="Sarlavha (masalan: 2 xonali, Chilonzor)" maxlength="100">
+  <input id="price" type="number" placeholder="Narx (so'm/oy)">
+  <input id="district" placeholder="Tuman / mo'ljal">
+  <input id="rooms" type="number" placeholder="Xonalar soni">
+  <textarea id="desc" rows="4" placeholder="Tavsif" maxlength="1000"></textarea>
+  <input id="phone" type="tel" placeholder="Telefon: +998 ...">
+  <input id="files" type="file" accept="image/*" multiple>
+  <div class="row">
+    <button class="btn alt" onclick="showList()">Bekor qilish</button>
+    <button class="btn" id="send" onclick="submitForm()">Joylash</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://hopnzraqudwkcpkteyyp.supabase.co";
+const SUPABASE_KEY = "sb_publishable_zE2-bPsE-T6Qe4CvLjBfdA_hcI_bwbe";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const tg = window.Telegram?.WebApp || {initDataUnsafe:{}, ready(){}, expand(){}};
+tg.ready(); tg.expand();
+const me = tg.initDataUnsafe?.user || {};
+let kind = "offer";
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const cleanPhone = p => String(p||"").replace(/[^\d+]/g,"");
+
+function setKind(k){kind=k;document.getElementById("t-offer").classList.toggle("on",k==="offer");document.getElementById("t-request").classList.toggle("on",k==="request");load();}
+function showForm(){document.getElementById("list").classList.add("hide");document.getElementById("form").classList.remove("hide");}
+function showList(){document.getElementById("form").classList.add("hide");document.getElementById("list").classList.remove("hide");}
+
+async function load(){
+  const box = document.getElementById("items");
+  let q = sb.from("listings").select("*").eq("kind",kind).order("created_at",{ascending:false}).limit(100);
+  const d = document.getElementById("f-district").value.trim();
+  const p = document.getElementById("f-price").value;
+  if(d) q = q.ilike("district", `%${d}%`);
+  if(p) q = q.lte("price", Number(p));
+  const {data, error} = await q;
+  if(error){box.innerHTML = `<div class="empty">Xatolik: ${esc(error.message)}</div>`;return;}
+  if(!data.length){box.innerHTML = `<div class="empty">Hozircha e'lon yo'q</div>`;return;}
+  box.innerHTML = data.map(x => `
+    <div class="card">
+      ${x.photos?.length ? `<div class="imgs">${x.photos.map(u=>`<img src="${esc(u)}" loading="lazy">`).join("")}</div>`:""}
+      <div class="b">
+        <div class="price">${x.price ? Number(x.price).toLocaleString("ru-RU")+" so'm/oy" : "Narx kelishiladi"}</div>
+        <div><b>${esc(x.title)}</b></div>
+        <div class="meta">${esc(x.district||"")}${x.rooms ? " · "+esc(x.rooms)+" xona":""}</div>
+        <div>${esc(x.description||"")}</div>
+        <div class="row">
+          <a class="btn" href="tel:${esc(cleanPhone(x.phone))}">📞 Qo'ng'iroq</a>
+          ${x.tg_username ? `<a class="btn alt" href="https://t.me/${esc(x.tg_username)}" target="_blank">✈️ Telegram</a>`:""}
+        </div>
+      </div>
+    </div>`).join("");
+}
+
+async function submitForm(){
+  const v = id => document.getElementById(id).value.trim();
+  if(!v("title") || !v("phone")){alert("Sarlavha va telefon majburiy");return;}
+  const btn = document.getElementById("send"); btn.disabled = true; btn.textContent = "Yuklanmoqda...";
+  try{
+    const files = [...document.getElementById("files").files].slice(0,5);
+    const photos = [];
+    for(const [i,f] of files.entries()){
+      if(f.size > 5*1024*1024) throw new Error("Rasm 5 MB dan oshmasin");
+      const path = `${Date.now()}_${i}_${Math.random().toString(36).slice(2,8)}.jpg`;
+      const {error} = await sb.storage.from("photos").upload(path, f, {contentType:f.type});
+      if(error) throw error;
+      photos.push(sb.storage.from("photos").getPublicUrl(path).data.publicUrl);
+    }
+    const {error} = await sb.from("listings").insert({
+      kind: v("kind"), title: v("title"), description: v("desc"),
+      price: v("price") ? Number(v("price")) : null, district: v("district"),
+      rooms: v("rooms") ? Number(v("rooms")) : null, phone: v("phone"), photos,
+      tg_user_id: me.id || null, tg_username: me.username || null
+    });
+    if(error) throw error;
+    ["title","price","district","rooms","desc","phone","files"].forEach(id=>document.getElementById(id).value="");
+    kind = v("kind"); setKind(kind); showList();
+  }catch(e){alert("Xatolik: "+(e.message||e));}
+  btn.disabled = false; btn.textContent = "Joylash";
+}
+load();
+</script>
+</body>
+</html>
